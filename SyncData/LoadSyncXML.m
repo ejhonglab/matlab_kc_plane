@@ -28,7 +28,7 @@
 
 function sampleRate = LoadSyncXML(varargin)
 %% Load dll:
-xmlFile = strcat(varargin{1}, 'ThorRealTimeDataSettings.xml');
+xmlFile = fullfile(varargin{1}, 'ThorRealTimeDataSettings.xml');
 assert(exist(xmlFile,'file')>0,'ThorRealTimeDataSettings.xml was not found. ');
 dataStruct = xml2struct(xmlFile);
 
