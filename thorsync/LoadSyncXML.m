@@ -32,6 +32,20 @@ xmlFile = fullfile(varargin{1}, 'ThorRealTimeDataSettings.xml');
 assert(exist(xmlFile,'file')>0,'ThorRealTimeDataSettings.xml was not found. ');
 dataStruct = xml2struct(xmlFile);
 
+%{
+disp('ThorSync XML file:')
+disp(xmlFile)
+disp('dataStruct:')
+disp(dataStruct)
+disp('dataStruct.Children:')
+disp(dataStruct.Children)
+% didn't work
+%disp('dataStruct.DaqDevices:')
+%disp(dataStruct.DaqDevices)
+disp('dataStruct.RealTimeDataSettings:')
+disp(dataStruct.RealTimeDataSettings)
+%}
+
 if(~isempty(dataStruct))
     BrdID = cellfun(@(x) strcmpi(x.Attributes.active,'1'),dataStruct.RealTimeDataSettings.DaqDevices.AcquireBoard);
     sampleID = cellfun(@(x) strcmpi(x.Attributes.enable,'1'),dataStruct.RealTimeDataSettings.DaqDevices.AcquireBoard{BrdID}.SampleRate);
