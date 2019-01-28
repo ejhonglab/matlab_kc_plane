@@ -6,6 +6,9 @@ if exist(hdf5_path, 'file')
     return
 end
 
+fprintf('converting ThorSync HDF5 in %s to .mat in %s...', thorsync_dir, ...
+    output_dir)
+
 outfolder = fullfile(output_dir, 'thorsync');
 if ~exist(outfolder, 'dir')
     mkdir(outfolder);
