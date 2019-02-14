@@ -1,17 +1,27 @@
-clear;
-gcp;
 
-% same demo as demo_script.m but using the class @CNMF
-%% load file
+% TODO any conflicts w/ installed CaImAn? rename?
+function cnmf(tiff_path, output_dir)
+% TODO TODO just take path to tif and strip to get thorimage id
+% TODO maybe take some of cnmf params too?
 
-date = '2019-01-18';
+% Gets only the final directory in the path, whether or not there is a trailing
+% filesep character.
+[~, tiff_prefix, ~] = fileparts(tiff_path);
 
-folder = sprintf('/mnt/nas/MB team/%s_analysis', date);
+assert(tiff_prefix(1) == '_');
+% Will need to change this if our ThorImage output naming convention changes.
+thorimage_id = tiff_prefix(1:4);
 
-nam = '_007';
-filename = [nam '_nr.tif'];
-filepath = fullfile(folder, 'tif stacks', filename);
-Y = loadtiff(filepath);
+%filename = [thorimage_id '_nr.tif'];
+
+% TODO TODO make new tif_stacks in output dir for output of normcorre?
+% can't be relative to output_dir if only tif_stacks is going to live alongside
+% the raw data...
+%filepath = fullfile(output_dir, 'tif_stacks', filename);
+
+% TODO TODO why is tiff loaded twice? first time just to compute d? Y doesn't
+% seem to be used... is d?
+Y = loadtiff(tiff_path);
 
 %%
 if ndims(Y) == 4
@@ -25,9 +35,16 @@ d = d1*d2*d3;                                          % total number of pixels
 %%
 CNM = CNMF;
 K = 600;        % # of expected components
-tau = 2;        % 
+tau = 3;        % 
 
-p = 0;                                            % order of autoregressive system (p = 0 no dynamics, p=1 just decay, p = 2, both rise and decay)
+% Order of autoregressive system
+% (p=0 no dynamics, p=1 just decay, p=2, both rise and decay)
+
+% TODO these parameters depend on frame rate / image size / noise / etc
+% one setting doesnt tend to work globally
+% most sensitive: tau, merge_thr, energy_thresh, thr_method
+
+p = 0;                                            
 merge_thr = 0.95;                                  % merging threshold
 
 options = CNMFSetParms(...   
@@ -58,19 +75,20 @@ options = CNMFSetParms(...
 % executed in one shot using the CNM.fit function:
  %CNM.fit(Y,options,K)
 %% load the dataset and create the object
-CNM.readFile(filepath);                         % insert path to file here  
+CNM.readFile(tiff_path);                         % insert path to file here  
 CNM.optionsSet(options);                        % setup the options structure
 CNM.gSig = options.gSig;
 %% Process the dataset
-close all
+
 CNM.preprocess;             % preprocessing (compute some quantities)
-CNM.initComponents(K);      % initialization
+CNM.initComponents(K);      % initialization 
 CNM.plotCenters()           % plot center of ROIs detected during initialization
-%%
-CNM.manuallyRefineComponents();
+%% POSTPROCESSING BEGINS
+
 %% Update components
 CNM.updateSpatial();        % update spatial components
 CNM.updateTemporal(0);      % update temporal components (do not deconvolve at this point)
+
 %% Plot contours
 CNM.cm = [];
 CNM.contours=[];
@@ -79,6 +97,14 @@ CNM.K = size(CNM.A,2);
 CNM.CI=[];
 %CNM.correlationImage();
 figure,CNM.plotContours();
+%% If you want to edit components, run this cell
+
+% TODO flag to skip, among w/ other interactive stuff
+CNM.manuallyRefineComponents();
+CNM.updateSpatial();        % update spatial components
+CNM.updateTemporal(0);      % update temporal components (do not deconvolve at this point)
+
+
 %% component classification
 CNM.evaluateComponents();   % evaluate spatial components based on their correlation with the data
 CNM.eventExceptionality();  % evaluate traces
@@ -102,11 +128,21 @@ CNM.updateTemporal();
 CNM.extractDFF();           % extract DF/F values.
 
 %% plot components in GUI
+% TODO disable this and all other interactive parts w/ flag so first pass can be
+% done offline (then script to just load -> view/edit in gui?)
 CNM.plotComponentsGUI();     % display all components
 
 %% 
 
+% From here to the end is "refining" the traces, including calculating dFF
+% within blocks.
+% TODO TODO TODO factor that refinement stuff into another fn (that needs timing
+% info, etc, as additional arguments)
+
+%{ refactor + uncomment
 sC_df = smoothdata(CNM.C_df, 2, 'loess', 25);
+% TODO what is the meaning of these hardcoded cids?
+% "for plotting"
 cids = 51:80;
 
 %cids([1 24])=[];
@@ -114,20 +150,17 @@ cids = 51:80;
 figure, iosr.figures.multiwaveplot(sC_df(cids,:),...
     'gain', 5,...
     'reverseY', true);
-%%
-CNMc = copy(CNM);
-CNMc.options.df_window=CNM.T/2;
-CNMc.extractDFF();
-%%
-cnm.T = CNM.T/2;
-cnm.C = reshape(full(CNMc.C), size(CNMc.C,1), [], 2);
-cnm.f = reshape(full(CNMc.f), size(CNMc.f,1), [], 2);
-cnm.R = reshape(full(CNMc.R), size(CNMc.R,1), [], 2);
+
+n_blocks = ti.num_trials;
+cnm.T = CNM.T / n_blocks;
+cnm.C = reshape(full(CNM.C), size(CNM.C,1), [], n_blocks);
+cnm.f = reshape(full(CNM.f), size(CNM.f,1), [], n_blocks);
+cnm.R = reshape(full(CNM.R), size(CNM.R,1), [], n_blocks);
 
 cnm.C_df = [];
 cnm.F0 = [];
 cnm.sC_df = [];
-for i = 1:2
+for i = 1:n_blocks
     C = cnm.C(:,:,i);
     f = cnm.f(:,:,i);
     R = cnm.R(:,:,i);
@@ -147,14 +180,41 @@ S.K = K;
 %%
 responseOptions.std_thr = 3;
 responseOptions.thr = 1;
-% TODO TODO fix...
+
+% TODO TODO fix... (just factor out?)
 response = compute_response_vectors(S.sDFF, ti, responseOptions);
 
-str = sprintf('%s: %s', date, nam);
-ft = plot_S_traces(S, ti, flag(1:50), response,str);
+str = sprintf('%s: %s', date, thorimage_id);
+ft = plot_S_traces(S, ti, flag(1:50), response, str);
+%}
+
+output_dir = fullfile(output_dir, 'cnmf');
+if ~exist(output_dir, 'dir')
+    mkdir(output_dir);
+end
 
 %% save CNM
-mat_filepath = fullfile(folder, 'cnmf', [nam '_cnmf.mat']);
-%disp(matwho(mat_filepath))
-%save(mat_filepath, 'CNM', '-append');
-save(mat_filepath, 'CNM');
+mat_filepath = fullfile(output_dir, [thorimage_id '_cnmf.mat']);
+
+% TODO just save 'ti' to different file and delete this hack. it is not clear
+% that _cnmf could *only* hold ti (which is completely unrelated to CNMF) if ti
+% is computed first
+if exist(mat_filepath, 'file')
+    save(mat_filepath, 'CNM', '-append');
+else
+    save(mat_filepath, 'CNM');
+end
+
+% TODO if i'm just going to use the MATLAB engine to read the MAT file
+% anyway, maybe get rid of the sCNM output?
+% TODO TODO test that output generated this way can actually be read by my
+% python stuff...
+sCNM = struct(CNM);
+% i forget, was converting from the sparse arrays actually necessary in the end
+% to load successfully?
+sCNM.A = full(sCNM.A);
+sCNM.A_pre = full(sCNM.A_pre);
+
+save(mat_filepath, 'sCNM', '-append');
+
+end

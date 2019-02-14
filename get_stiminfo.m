@@ -1,41 +1,16 @@
 
-%{
-clear, clc, close all
-%%
-date = '2019-01-18';
-
-folder = sprintf(['/media/remy/remy-storage/Remy''s Dropbox Folder/',...
-    'HongLab @ Caltech Dropbox/Remy/2019 data analysis/%s_analysis'], date);
-
-
-%% load Experiment.xml file
-nam = '007';
-%}
-
-function syncdata(date, fly_num, thorimage_dir, thorsync_dir, output_dir)
-
-% TODO maybe make analysis dir opt and output to thorimage or something
-% otherwise? working dir?
-% TODO TODO just store all output of a given type in the same directory
-% but just with date and fly_num (prefixed to thorimage recording...) in name?
-% TODO TODO or make fly specific subfolder first?
-% i think analysis_output/date/fly/thorimage_dir/<all analysis output>
-% might make the most sense (if want it in diff tree from raw data). no need to
-% screw with filenames at all
-
-% TODO best to just take dir as fn? and copy all other generated files into same
-% raw data dirs? or pass IDs and know about layout in here? multiple args?
-% (going w/ last option for now)
+function get_stiminfo(thorimage_dir, thorsync_dir, output_dir,...
+                      date, fly_num)
+% Can be called with all arguments, fly_num missing, or date and fly_num
+% missing.
 
 % Gets only the final directory in the path, whether or not there is a trailing
 % filesep character.
-[~, thorimage_id, ~] = fileparts(strip(thorsync_dir, filesep));
+[~, thorimage_id, ~] = fileparts(strip(thorimage_dir, filesep));
 thorimage_id = strip(thorimage_id, '_');
 
-% TODO prepend w/ fly_num (take as (opt?) arg?)
 %thorimage_xml_filename = sprintf('_%s.xml', thorimage_id);
-% TODO rename folder to remove space
-%thorimage_xml_filepath = fullfile(folder, 'xml files', thorimage_xml_filename);
+%thorimage_xml_filepath = fullfile(folder, 'xml_files', thorimage_xml_filename);
 
 thorimage_xml_filepath = fullfile(thorimage_dir, 'Experiment.xml');
 
@@ -50,15 +25,17 @@ ThorImageExperiment = temp.ThorImageExperiment;
 % ti.ts = frame_num;
 %% load thorsync
 
-%{
-tsync_filename = sprintf('SyncData%s.mat', thorimage_id);
-% TODO so this is necessary? autoconvert to this then...
-% (and in same pipeline here, rather than on acquisition computer)
-tsync_filepath = fullfile(folder, 'thorSync', tsync_filename);
+% TODO TODO strip /, split on /, and take last part, in case full path passed in
+tsync_filename = sprintf('%s.mat', thorsync_dir);
+
+% Probably won't work w/ Windows specific filesep, and filesep probably wouldn't
+% work with forward slashed paths in Windows.
+[parent_dir, ~, ~] = fileparts(['/' strip(thorimage_dir, '/')]);
+tsync_filepath = fullfile(parent_dir, 'thorsync', tsync_filename);
 ai = load(tsync_filepath);
-%}
 % TODO just load from hdf5 as she does elsewhere
 
+% TODO had I commented this? should it be uncommented?
 %ai.fpid = smoothdata(ai.pid, 'gaussian', 100);
 %%
 
@@ -69,7 +46,7 @@ ti.averageMode = str2double(ThorImageExperiment.LSM.Attributes.averageMode);
 ti.averageNum = str2double(ThorImageExperiment.LSM.Attributes.averageNum);
 
 fr = str2double(ThorImageExperiment.LSM.Attributes.frameRate);
-if ti.averageMode==1
+if ti.averageMode == 1
    fr = fr/ti.averageNum; 
 end
 ti.fr = fr;
@@ -94,6 +71,7 @@ ti.fpt = ti.ts/ti.num_trials;                       % frames per trial
 
 %%
 
+% TODO what exactly is Frame_Out?
 frameOutLogical = logical(ai.Frame_Out);
 frameOutDiff = diff(frameOutLogical);
 risingEdge = find(frameOutDiff>0);
@@ -103,19 +81,22 @@ rLT = ai.time(risingEdge);
 fLT = ai.time(fallingEdge);
 
 gap = diff(rLT);
+% 0.0169 is the time between consective times in frame out counter.
+% TODO may change w/ dimensions or some other (?) imaging settings. compute each
+% time?
+% Checking if gap is >10% more than expected.
 idx = find(gap>(1.1*.0169));
-idx = [0 idx numel(rLT)];
+idx = [0 idx' numel(rLT)];
 
 idx_by_stim = cell(ti.num_trials,1);
 for i = 1:ti.num_trials
-   idx_by_stim{i} = (idx(i)+1):idx(i+1);
+    idx_by_stim{i} = (idx(i)+1):idx(i+1);
 end
-
 
 av_frames_by_stim = cell(ti.num_trials,1);
 times_by_stim = cell(ti.num_trials,1);
 frame_times = [];
-if ti.averageMode==1
+if ti.averageMode == 1
    for i = 1:ti.num_trials
        idx = idx_by_stim{i};
        av_frames_by_stim{i} = idx(ti.averageNum):ti.averageNum:idx(end);
@@ -149,6 +130,7 @@ ti.stim_off = end_frame;
 ti.baseline_length = 3;
 ti.baseline_start_time = ti.stim_ict-ti.baseline_length;
 
+
 start_frame = zeros(1,ti.num_trials);
 end_frame = zeros(1,ti.num_trials);
 for i = 1:ti.num_stim
@@ -158,7 +140,10 @@ for i = 1:ti.num_stim
 end
 ti.baseline_start = start_frame;
 ti.baseline_end = end_frame;
+% TODO TODO print out what this is if going to keep doing this
+% + better format? flag to suppress?
 disp([ti.baseline_start;ti.baseline_end]);
+
 %% calculate peak response frames
 ti.peakresp_length = 3;
 
@@ -171,6 +156,8 @@ for i = 1:ti.num_stim
 end
 ti.peakresp_start = start_frame;
 ti.peakresp_end = end_frame;
+% TODO TODO print out what this is if going to keep doing this
+% + better format?
 disp([ti.peakresp_start;ti.peakresp_end]);
 %% calculate response frames
 ti.resp_length = 25;
@@ -184,10 +171,14 @@ for i = 1:ti.num_stim
 end
 ti.resp_start = start_frame;
 ti.resp_end = end_frame;
+% TODO TODO print out what this is if going to keep doing this
+% + better format?
 disp([ti.resp_start;ti.resp_end]);
 
 %% stimulus info: arduino pins, stimulus index, pin_odors
 
+% TODO TODO remove all stuff dealing w/ hard coded odor / pin info
+%{
 ti.pin_odors = cell(13,1);
 ti.pin_odors{2} = 'ethyl acetate';
 ti.pin_odors{3} = 'butanoic acid';
@@ -213,6 +204,8 @@ ti.pair_list = cell(size(U,1), 1);
 for i = 1:size(U,1)
     ti.pair_list{i} =  [ti.pin_odors{U(i,1)} ' + ' ti.pin_odors{U(i,2)}];
 end
+%}
+
 %%
 % 
 % ti.stim_list = cell(numel(ti.unique_odor_pairs), 2);
@@ -233,33 +226,50 @@ end
 
 % TODO at least include a flag to disable plotting when used
 % non-interactively...
-time = ai.time-ti.block_ict(1);
+time = ai.time - ti.block_ict(1);
 fsync = figure;
 plot(time, ai.scopePin);
 % TODO remove?
-hold on
+hold on;
 plot(time, ai.olfDispPin);
-str = sprintf('%s: %s', date, thorimage_id);
+
+switch nargin
+    case 5
+        str = sprintf('%s, fly %d: %s', date, fly_num, thorimage_id);
+    case 4
+        % Assumed the last argument is the date str in this case.
+        str = sprintf('%s: %s', date, thorimage_id);
+    case 3
+        str = sprintf('%s', thorimage_id);
+end
 title(str);
-ylim([-1 6])
-%%
-% TODO prepend w/ fly_num (take as (opt?) arg?) (?)
+ylim([-1 6]);
+
+
+fig_output_dir = fullfile(output_dir, 'figures');
+if ~exist(fig_output_dir, 'dir')
+    mkdir(fig_output_dir);
+end
+
 fname = sprintf('%s_trial_structure.tif', thorimage_id);
-% TODO TODO make dir(s) if necessary
-print(fsync, fullfile(output_dir, 'figures', fname), '-dtiffn');
-%% save ti to .mat file
-% TODO prepend w/ fly_num (take as (opt?) arg?)
+print(fsync, fullfile(fig_output_dir, fname), '-dtiffn');
+
+
+mat_output_dir = fullfile(output_dir, 'cnmf');
+if ~exist(mat_output_dir, 'dir')
+    mkdir(mat_output_dir);
+end
+
 mat_filename = sprintf('_%s_cnmf.mat', thorimage_id);
-mat_filepath = fullfile(output_dir, 'cnmf', mat_filename);
-disp(matwho(mat_filepath))
+mat_filepath = fullfile(mat_output_dir, mat_filename);
 
 % TODO maybe return from fn, and save outside? (to avoid needing files
 % around...)
 
-% TODO print where it is saving to?
-% TODO also need to save fly num? maybe date isn't even necessary if keep folder
-% structure organized?
-save(mat_filepath, 'ti', 'date', '-append');
-%%
+if exist(mat_filepath, 'file')
+    save(mat_filepath, 'ti', '-append');
+else
+    save(mat_filepath, 'ti');
+end
 
 end
