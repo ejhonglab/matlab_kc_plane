@@ -37,6 +37,8 @@ end
 % TODO reformat with more information
 disp(['normcorre: ' thorimage_id]);
 
+interactive_plots = false;
+
 try
     % Remy: this seems like it might just be reading in the first frame?
     %%%Y = input_tif_path;
@@ -67,8 +69,14 @@ try
         MC_rigid.correlationMean();
         MC_rigid.crispness();
         disp('normcorre done');
+
         %% plot shifts
-        figure
+        if interactive_plots
+            figure;
+        else
+            figure('visible', 'off');
+        end
+        
         subplot(2,1,1)
         plot(MC_rigid.shifts_x);
         title('MC_rigid.shifts_x', 'Interpreter', 'None');
@@ -81,7 +89,11 @@ try
         tt = suptitle(str);
         tt.Interpreter = 'None';
         %%
-        figure
+        if interactive_plots
+            figure;
+        else
+            figure('visible', 'off');
+        end
         subplot(2,1,1)
         % TODO TODO fix harcoded indices
         %%%%%plot(MC_rigid.corrY(1:2992));
@@ -155,9 +167,12 @@ try
         MC_nonrigid.crispness();
         disp('non-rigid normcorre done')
 
-        % TODO at least include a flag to disable interactive plotting
         %%
-        figure
+        if interactive_plots
+            figure;
+        else
+            figure('visible', 'off');
+        end
             subplot(2,1,1)
             plot(MC_nonrigid.shifts_x);
             title('MC_nonrigid.shifts_x', 'Interpreter', 'None');
@@ -169,7 +184,11 @@ try
             tt = suptitle(str);
             tt.Interpreter = 'None';
         %%
-        figure
+        if interactive_plots
+            figure;
+        else
+            figure('visible', 'off');
+        end
             subplot(2,1,1)
             plot(MC_nonrigid.corrY);
             title('MC_nonrigid.corrY', 'Interpreter', 'None');
@@ -189,6 +208,10 @@ try
         disp(['saving tiff to ' nr_tif]);
         saveastiff(M, nr_tif, tiffoptions);
     end
+
+    % TODO need to escape underscore in figure titles so that it doesnt make
+    % next number subscript (and not displaying the underscore).
+    % actually it doesn't always seem to be a problem... why?
 
     if need_avg_nr_tif
         % TODO flag to disable saving this average

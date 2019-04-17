@@ -104,8 +104,12 @@ else
     time = ai.time;
 end
 
-% TODO maybe a flag to enable showing if remy wants it
-fsync = figure('visible', 'off');
+interactive_plots = false;
+if interactive_plots
+    fsync = figure;
+else
+    fsync = figure('visible', 'off');
+end
 plot(time, ai.scopePin);
 hold on;
 plot(time, ai.olfDispPin);
