@@ -225,6 +225,11 @@ try
 catch err
     if strcmp(err.identifier, 'MATLAB:nomem')
         % To understand memory usage of variables *before* offending call.
+        % TODO TODO fix display here... if this is showing variables, it's not
+        % showing bytes
+        % output once seems to have been
+        % "name,size,bytes,class,global,sparse,complex,nesting,persistent", each
+        % on one line
         disp(whos);
     end
     rethrow(err);

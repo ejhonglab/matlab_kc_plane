@@ -1,6 +1,7 @@
 
-function get_stiminfo(thorimage_dir, thorsync_dir, output_dir,...
-                      date, fly_num)
+function [updated, mat_filepath] = get_stiminfo(thorimage_dir, thorsync_dir, ...
+    output_dir, date, fly_num, update)
+
 % Can be called with all arguments, fly_num missing, or date and fly_num
 % missing.
 
@@ -21,8 +22,10 @@ if exist(mat_filepath, 'file')
     % TODO automate compiling of matwho. maybe fail rather than fallback to
     % default who.
     % Default 'who' is too slow with large .mat files.
-    if any(contains(matwho(mat_filepath), 'ti'))
+    if (~update) & any(contains(matwho(mat_filepath), 'ti'))
+        % TODO put behind verbose flag
         fprintf('\nti was already defined in %s\n', mat_filepath);
+        updated = false;
         return;
     end
 
@@ -114,14 +117,17 @@ plot(time, ai.scopePin);
 hold on;
 plot(time, ai.olfDispPin);
 
+% TODO handle this better... arguments are getting pretty fragile now and
+% it's not like i'm really taking advantage of the fact they are optional
 switch nargin
-    case 5
+    case 6
         str = sprintf('%s, fly %d: %s', date, fly_num, thorimage_id);
-    case 4
+    case 5
         % Assumed the last argument is the date str in this case.
         str = sprintf('%s: %s', date, thorimage_id);
-    case 3
+    case 4
         str = sprintf('%s', thorimage_id);
+    % TODO empty str basecase
 end
 title(str);
 ylim([-1 6]);
@@ -176,8 +182,8 @@ frameOutLogical = logical(ai.Frame_Out(1:last_block_last_frame));
 % or maybe eliminate pulsewidth?
 frameOutDiff = diff(frameOutLogical);
 % TODO more meaningful names
-risingEdge = find(frameOutDiff>0);
-fallingEdge = find(frameOutDiff<0);
+risingEdge = find(frameOutDiff > 0);
+fallingEdge = find(frameOutDiff < 0);
 
 % TODO more meaningful names
 rLT = ai.time(risingEdge);
@@ -191,25 +197,31 @@ gap = diff(rLT);
 % Checking if gap is >10% more than expected.
 % TODO TODO give idx a more meaningful name. what is it?
 % TODO why use both this and scopePin?
-idx = find(gap > (1.1*.0169));
+idx = find(gap > (1.1 * .0169));
 idx = [0 idx' numel(rLT)];
 
 % TODO case where noise peaks are not the last peaks, but are still in idx, will
 % probably not be handled correctly right now.
 
 idx_by_stim = cell(ti.num_trials, 1);
-% TODO is this error a matter of base case being mishandled or boundaries in all
-% cases? (does it just not work w/ num_trials = 1, or 
 for i = 1:ti.num_trials
     idx_by_stim{i} = (idx(i)+1):idx(i+1);
 end
 
-av_frames_by_stim = cell(ti.num_trials,1);
-times_by_stim = cell(ti.num_trials,1);
+% TODO meaning of this variable? "av_"?
+av_frames_by_stim = cell(ti.num_trials, 1);
+times_by_stim = cell(ti.num_trials, 1);
+% TODO TODO TODO frame_times used to be same length as movie, but after
+% subsetting Frame_Out, it is not. fix frame_times / provide other information
+% to match it up to whole movie.
 frame_times = [];
 if ti.averageMode == 1
    for i = 1:ti.num_trials
+       % TODO rename idx here and below
        idx = idx_by_stim{i};
+       % TODO is ti.averageNum a correct base case?
+       % and isn't idx indexed as in ThorSync (with the much higher 30KHz), or
+       % is it not?
        av_frames_by_stim{i} = idx(ti.averageNum):ti.averageNum:idx(end);
        times_by_stim{i} = fLT(av_frames_by_stim{i});
        frame_times = [frame_times; times_by_stim{i}];
@@ -220,15 +232,18 @@ ti.av_frames_by_stim = av_frames_by_stim;
 ti.times_by_stim = times_by_stim;
 ti.frame_times = frame_times;
 
+% TODO also rename these to blocks?
 %% calculate trial_start and trial_end frames
 ti.trial_end = cumsum(cellfun(@numel, ti.av_frames_by_stim'));
-ti.trial_start = [0 ti.trial_end(1:end-1)]+1;
+ti.trial_start = [0 ti.trial_end(1:end-1)] + 1;
 
 %% calculate frames when olfDispPin is high
-start_frame = zeros(1,ti.num_trials);
-end_frame = zeros(1,ti.num_trials);
+start_frame = zeros(1, ti.num_trials);
+end_frame = zeros(1, ti.num_trials);
 for i = 1:ti.num_stim
-    idx = find(ti.frame_times>=ti.stim_ict(i) & ti.frame_times<=ti.stim_fct(i));
+    idx = find(ti.frame_times >= ti.stim_ict(i) & ...
+        ti.frame_times <= ti.stim_fct(i));
+
     start_frame(i) = idx(1);
     end_frame(i) = idx(end);
 end
@@ -239,13 +254,15 @@ ti.stim_off = end_frame;
 
 % length of baseline (before stim on) in seconds
 ti.baseline_length = 3;
-ti.baseline_start_time = ti.stim_ict-ti.baseline_length;
+ti.baseline_start_time = ti.stim_ict - ti.baseline_length;
 
 
-start_frame = zeros(1,ti.num_trials);
-end_frame = zeros(1,ti.num_trials);
+start_frame = zeros(1, ti.num_trials);
+end_frame = zeros(1, ti.num_trials);
 for i = 1:ti.num_stim
-    idx = find(ti.frame_times>=ti.baseline_start_time(i) & ti.frame_times<ti.stim_ict(i));    
+    idx = find(ti.frame_times >= ti.baseline_start_time(i) & ...
+        ti.frame_times < ti.stim_ict(i));
+
     start_frame(i) = idx(1);
     end_frame(i) = idx(end);
 end
@@ -255,13 +272,16 @@ ti.baseline_end = end_frame;
 % + better format? flag to suppress?
 %disp([ti.baseline_start;ti.baseline_end]);
 
+% TODO huh?
 %% calculate peak response frames
 ti.peakresp_length = 3;
 
 start_frame = zeros(1,ti.num_trials);
 end_frame = zeros(1,ti.num_trials);
 for i = 1:ti.num_stim
-    idx = find(ti.frame_times>=ti.stim_ict(i) & ti.frame_times<=(ti.stim_ict(i)+ti.peakresp_length));    
+    idx = find(ti.frame_times >= ti.stim_ict(i) & ...
+        ti.frame_times <= (ti.stim_ict(i) + ti.peakresp_length));
+
     start_frame(i) = idx(1);
     end_frame(i) = idx(end);
 end
@@ -276,7 +296,9 @@ ti.resp_length = 25;
 start_frame = zeros(1,ti.num_trials);
 end_frame = zeros(1,ti.num_trials);
 for i = 1:ti.num_stim
-    idx = find(ti.frame_times>=ti.stim_ict(i) & ti.frame_times<=(ti.stim_ict(i)+ti.resp_length));    
+    idx = find(ti.frame_times >= ti.stim_ict(i) & ...
+        ti.frame_times <= (ti.stim_ict(i) + ti.resp_length));    
+
     start_frame(i) = idx(1);
     end_frame(i) = idx(end);
 end
@@ -343,5 +365,6 @@ if create_mat
 else
     save(mat_filepath, 'ti', '-append');
 end
+updated = true;
 
 end
