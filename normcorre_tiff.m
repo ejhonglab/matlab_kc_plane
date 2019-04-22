@@ -1,5 +1,8 @@
 
-function normcorre_tiff(input_tif_path, output_dir)
+function [rig_updated, nr_updated] = normcorre_tiff(input_tif_path, output_dir)
+
+rig_updated = false;
+nr_updated = false;
 
 % TODO gcp ("get current parallel pool") necessary?
 %gcp;
@@ -117,6 +120,7 @@ try
         disp(['saving tiff to ' rig_tif]);
         saveastiff(M, rig_tif, tiffoptions);
     end
+    rig_updated = true;
 
     if need_avg_rig_tif
         %%
@@ -208,6 +212,7 @@ try
         disp(['saving tiff to ' nr_tif]);
         saveastiff(M, nr_tif, tiffoptions);
     end
+    nr_updated = true;
 
     % TODO need to escape underscore in figure titles so that it doesnt make
     % next number subscript (and not displaying the underscore).

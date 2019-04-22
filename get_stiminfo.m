@@ -1,5 +1,5 @@
 
-function [updated, mat_filepath] = get_stiminfo(thorimage_dir, thorsync_dir, ...
+function [updated] = get_stiminfo(thorimage_dir, thorsync_dir, ...
     output_dir, date, fly_num, update)
 
 % Can be called with all arguments, fly_num missing, or date and fly_num
