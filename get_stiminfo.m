@@ -66,7 +66,7 @@ ti.fr = fr;
 
 % TODO does pulsewidth always have the initcross either up or down?
 % maybe don't use it if not? may also want fixed ~2.5v thresh...
-[~,ic,fc,~] = pulsewidth(ai.scopePin);
+[~, ic, fc, ~] = pulsewidth(ai.scopePin);
 
 % Filter out very short pulses, which are likely an artifact of some sort.
 min_acquisition_length_s = 5.0;
@@ -149,64 +149,159 @@ end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-last_block_last_frame = ti.block_fc_idx(end);
+% TODO off by one? add one?
+last_block_end_index = ti.block_fc_idx(end);
+last_block_end_time = ti.block_fct(end);
 
-% TODO TODO ask Remy if she thinks subsetting olfDispPin like this might cause
-% other issues
-[~,ic,fc,~] = pulsewidth(ai.olfDispPin(1:last_block_last_frame));
-ti.stim_ic_idx = round(ic);
-ti.stim_fc_idx = round(fc);
-ti.stim_ict = ai.time(ti.stim_ic_idx);
-ti.stim_fct = ai.time(ti.stim_fc_idx);
-ti.num_stim = length(ti.stim_fct);                  % # of odor pulses
+max_trigger_to_last_frame_sec = 1;
+last_fall_check_time = last_block_end_time + max_trigger_to_last_frame_sec;
 
-ti.spt = ti.num_stim / ti.num_trials;               % stimuli per trial
-ti.fpt = ti.ts / ti.num_trials;                       % frames per trial
-
-%%
-
-% TODO what exactly is Frame_Out? just one pulse per frame? other timing
-% information meaningful (e.g. does high period include all scan time for
-% frame?)
-% TODO TODO ask Remy if she thinks subsetting olfDispPin like this might cause
-% other issues
-% TODO might need to check Frame_Out phase w.r.t. scopePin. frames might come
-% out after scope pins goes low, and would want to account for that
-% TODO TODO in that case, use some timepoint just before the scope pin goes high
-% in a partial block, in the case where there is one partial block at the end
-% TODO or add some fixed amount of timepoints beyond last_block_last_frame, but
-% then might need to be careful if acquisition ends shortly after real last
-% block
-frameOutLogical = logical(ai.Frame_Out(1:last_block_last_frame));
+frameOutLogical = logical(ai.Frame_Out(ai.time <= last_fall_check_time));
 % TODO maybe use pulsewidth to be consistent w/ rest of code? why not?
 % or maybe eliminate pulsewidth?
 frameOutDiff = diff(frameOutLogical);
-% TODO more meaningful names
-risingEdge = find(frameOutDiff > 0);
-fallingEdge = find(frameOutDiff < 0);
+rising_edge_indices_frame_out = find(frameOutDiff > 0);
+falling_edge_indices_frame_out = find(frameOutDiff < 0);
 
-% TODO more meaningful names
-rLT = ai.time(risingEdge);
-fLT = ai.time(fallingEdge);
+rising_edge_time_frame_out = ai.time(rising_edge_indices_frame_out);
+falling_edge_time_frame_out = ai.time(falling_edge_indices_frame_out);
+
+% TODO maybe just filter out beginning artifacts if this case is encountered?
+% frame_out should start low (rise before falling)
+assert(rising_edge_time_frame_out(1) < falling_edge_time_frame_out(1));
+assert(numel(rising_edge_time_frame_out) == numel(falling_edge_time_frame_out));
+%frame_out_length = falling_edge_time_frame_out - rising_edge_time_frame_out;
+
+low2high_times = (rising_edge_time_frame_out(2:end) - ...
+                  falling_edge_time_frame_out(1:(end - 1)));
+
+% TODO maybe hardcode / approximate this for speed
+max_frame_out_low2high_interval = mode(low2high_times) * 1.5;
+
+falls_to_check = falling_edge_time_frame_out >= last_block_end_time & ...
+                 falling_edge_time_frame_out <= last_fall_check_time;
+fall_times_to_check = falling_edge_time_frame_out(falls_to_check);
+fall_indices_to_check = falling_edge_indices_frame_out(falls_to_check);
+
+% TODO delete
+%{
+disp('last_block_end_time')
+disp(last_block_end_time)
+disp('last_fall_check_time')
+disp(last_fall_check_time)
+disp('max_frame_out_low2high_interval');
+disp(max_frame_out_low2high_interval);
+disp('fall_times_to_check');
+disp(fall_times_to_check);
+%}
+
+% TODO vectorized way to do this?
+last_block_fall_time = nan;
+for i = 1:length(fall_times_to_check)
+    fall_time = fall_times_to_check(i);
+    max_time = fall_time + max_frame_out_low2high_interval;
+
+    rising_edge_logical = rising_edge_time_frame_out >= fall_time ...
+        & rising_edge_time_frame_out <= max_time;
+
+    %{
+    disp('fall time:');
+    disp(fall_time);
+    disp('max_time')
+    disp(max_time)
+    disp('rise times in window:');
+    disp(rising_edge_time_frame_out(rising_edge_logical));
+    %}
+
+    if sum(rising_edge_logical) == 0
+        last_block_fall_time = fall_time;
+        last_block_fall_index = fall_indices_to_check(i);
+        break
+    end
+end
+
+if isnan(last_block_fall_time)
+    error(['Frame Out continued pulsing right until end of recording. ' ...
+          'The recording may have stopped incorrectly.']);
+end
+
+% TODO delete
+%{
+disp('last_block_fall_time')
+disp(last_block_fall_time)
+disp('last_block_fall_index')
+disp(last_block_fall_index)
+
+figure;
+buff = 4000;
+start = last_block_end_index - buff;
+stop = last_block_end_index + buff;
+plot_times = ai.time(start:stop);
+plot(plot_times, frameOutLogical(start:stop))
+hold on;
+plot(plot_times, ai.scopePin(start:stop))
+uiwait;
+%}
+
+% TODO right now, this does not include the double pulse i've seen at the
+% last pulse of frame_out in at least one recording. change if necessary.
+last_block_end_index = last_block_fall_index;
 
 % TODO more meaningful name
-gap = diff(rLT);
+gap = diff(rising_edge_time_frame_out);
+
+% TODO delete. for debugging.
+%{
+disp('max(gap)')
+disp(max(gap))
+disp('min(gap)')
+disp(min(gap))
+disp('mode(gap)')
+disp(mode(gap))
+% TODO TODO check against something else that this is actually the # of frames
+disp('numel(rising_edge_time_frame_out)')
+disp(numel(rising_edge_time_frame_out))
+disp('numel(falling_edge_time_frame_out)')
+disp(numel(falling_edge_time_frame_out))
+%}
+%
+
 % 0.0169 is the time between consective times in frame out counter.
 % TODO TODO TODO may change w/ dimensions or some other (?) imaging settings.
 % compute each time?
 % Checking if gap is >10% more than expected.
 % TODO TODO give idx a more meaningful name. what is it?
 % TODO why use both this and scopePin?
+
+% TODO TODO rename to indicate which side of block_boundary this is on
+% (index of start/end of last frame/first frame of next block)
 idx = find(gap > (1.1 * .0169));
-idx = [0 idx' numel(rLT)];
+idx = [0 idx' numel(rising_edge_time_frame_out)];
+
+% TODO delete
+%{
+disp('idx(idx >= start & idx <= stop)')
+disp(idx(idx >= start & idx <= stop))
+%}
+
+% TODO is there always a double peak at end of acquistion?
+% (high period ~2x as long) is that intentional? should it be counted?
+% counted twice?
+%
 
 % TODO case where noise peaks are not the last peaks, but are still in idx, will
 % probably not be handled correctly right now.
 
 idx_by_stim = cell(ti.num_trials, 1);
 for i = 1:ti.num_trials
-    idx_by_stim{i} = (idx(i)+1):idx(i+1);
+    idx_by_stim{i} = (idx(i) + 1):idx(i + 1);
 end
+% TODO delete. for debugging.
+%{
+disp('idx_by_stim')
+disp(idx_by_stim)
+%}
+%
 
 % TODO meaning of this variable? "av_"?
 av_frames_by_stim = cell(ti.num_trials, 1);
@@ -219,11 +314,31 @@ if ti.averageMode == 1
    for i = 1:ti.num_trials
        % TODO rename idx here and below
        idx = idx_by_stim{i};
+       % TODO TODO TODO are frameout pulses always in number that is a multiple
+       % of averageNum??? need to handle case where there might be spurious
+       % extra frames?
        % TODO is ti.averageNum a correct base case?
        % and isn't idx indexed as in ThorSync (with the much higher 30KHz), or
        % is it not?
        av_frames_by_stim{i} = idx(ti.averageNum):ti.averageNum:idx(end);
-       times_by_stim{i} = fLT(av_frames_by_stim{i});
+
+       % TODO delete. for debugging.
+       %{
+       disp('size(av_frames_by_stim{i})')
+       disp(size(av_frames_by_stim{i}))
+       disp('size(av_frames_by_stim)')
+       disp(size(av_frames_by_stim))
+       disp('size(falling_edge_time_frame_out)')
+       disp(size(falling_edge_time_frame_out))
+       disp('size(times_by_stim)')
+       disp(size(times_by_stim))
+       disp('i')
+       disp(i)
+       disp('max(av_frames_by_stim{i})')
+       disp(max(av_frames_by_stim{i}))
+       %}
+       %
+       times_by_stim{i} = falling_edge_time_frame_out(av_frames_by_stim{i});
        frame_times = [frame_times; times_by_stim{i}];
    end
 end
@@ -237,9 +352,29 @@ ti.frame_times = frame_times;
 ti.trial_end = cumsum(cellfun(@numel, ti.av_frames_by_stim'));
 ti.trial_start = [0 ti.trial_end(1:end-1)] + 1;
 
+%{
+disp('size(ai.olfDispPin)')
+disp(size(ai.olfDispPin))
+disp('size(ai.olfDispPin(1:last_block_end_index))')
+disp(size(ai.olfDispPin(1:last_block_end_index)))
+%}
+
 %% calculate frames when olfDispPin is high
+[~, ic, fc, ~] = pulsewidth(ai.olfDispPin(1:last_block_end_index));
+ti.stim_ic_idx = round(ic);
+ti.stim_fc_idx = round(fc);
+ti.stim_ict = ai.time(ti.stim_ic_idx);
+ti.stim_fct = ai.time(ti.stim_fc_idx);
+% # of odor pulses
+ti.num_stim = length(ti.stim_fct);
+
 start_frame = zeros(1, ti.num_trials);
 end_frame = zeros(1, ti.num_trials);
+
+%{
+disp('ti.num_stim')
+disp(ti.num_stim)
+%}
 for i = 1:ti.num_stim
     idx = find(ti.frame_times >= ti.stim_ict(i) & ...
         ti.frame_times <= ti.stim_fct(i));
@@ -249,116 +384,6 @@ for i = 1:ti.num_stim
 end
 ti.stim_on = start_frame;
 ti.stim_off = end_frame;
-
-%% calculate baseline frames
-
-% length of baseline (before stim on) in seconds
-ti.baseline_length = 3;
-ti.baseline_start_time = ti.stim_ict - ti.baseline_length;
-
-
-start_frame = zeros(1, ti.num_trials);
-end_frame = zeros(1, ti.num_trials);
-for i = 1:ti.num_stim
-    idx = find(ti.frame_times >= ti.baseline_start_time(i) & ...
-        ti.frame_times < ti.stim_ict(i));
-
-    start_frame(i) = idx(1);
-    end_frame(i) = idx(end);
-end
-ti.baseline_start = start_frame;
-ti.baseline_end = end_frame;
-% TODO TODO print out what this is if going to keep doing this
-% + better format? flag to suppress?
-%disp([ti.baseline_start;ti.baseline_end]);
-
-% TODO huh?
-%% calculate peak response frames
-ti.peakresp_length = 3;
-
-start_frame = zeros(1,ti.num_trials);
-end_frame = zeros(1,ti.num_trials);
-for i = 1:ti.num_stim
-    idx = find(ti.frame_times >= ti.stim_ict(i) & ...
-        ti.frame_times <= (ti.stim_ict(i) + ti.peakresp_length));
-
-    start_frame(i) = idx(1);
-    end_frame(i) = idx(end);
-end
-ti.peakresp_start = start_frame;
-ti.peakresp_end = end_frame;
-% TODO TODO print out what this is if going to keep doing this
-% + better format?
-%disp([ti.peakresp_start;ti.peakresp_end]);
-%% calculate response frames
-ti.resp_length = 25;
-
-start_frame = zeros(1,ti.num_trials);
-end_frame = zeros(1,ti.num_trials);
-for i = 1:ti.num_stim
-    idx = find(ti.frame_times >= ti.stim_ict(i) & ...
-        ti.frame_times <= (ti.stim_ict(i) + ti.resp_length));    
-
-    start_frame(i) = idx(1);
-    end_frame(i) = idx(end);
-end
-ti.resp_start = start_frame;
-ti.resp_end = end_frame;
-% TODO TODO print out what this is if going to keep doing this
-% + better format?
-%disp([ti.resp_start;ti.resp_end]);
-
-%% stimulus info: arduino pins, stimulus index, pin_odors
-
-% TODO TODO remove all stuff dealing w/ hard coded odor / pin info
-%{
-ti.pin_odors = cell(13,1);
-ti.pin_odors{2} = 'ethyl acetate';
-ti.pin_odors{3} = 'butanoic acid';
-ti.pin_odors{4} = 'methyl acetate';
-ti.pin_odors{5} = 'ethanol';
-ti.pin_odors{6} = 'propyl acetate';
-ti.pin_odors{8} = 'paraffin';
-ti.pin_odors{9} = '3-methylbutan-1-ol';
-ti.pin_odors{10} = '3-methylbutyl acetate';
-ti.pin_odors{11} = ' propan-1-ol';
-
-ti.channelA =  [2,2,9,2,9,2,9,2,2];
-ti.channelB =  [8,9,8,8,8,9,8,9,8];
-%%
-
-odor_pairs = [ti.channelA' ti.channelB'];
-odor_pairs = sort(odor_pairs,2);
-[U, ia, ib]=unique(odor_pairs, 'stable', 'rows');
-
-ti.unique_odor_pairs = U;    % unique odor pairs
-ti.si = ib;
-ti.pair_list = cell(size(U,1), 1);
-for i = 1:size(U,1)
-    ti.pair_list{i} =  [ti.pin_odors{U(i,1)} ' + ' ti.pin_odors{U(i,2)}];
-end
-%}
-
-%%
-% 
-% ti.stim_list = cell(numel(ti.unique_odor_pairs), 2);
-% for i = 1:numel(ti.unique_odor_pairs)
-%     ti.stim_list{i,1} = ti.pin_odors(ti.unique_odor_pairs(i,1));
-%     ti.stim_list{i,2} = ti.pin_odors(ti.unique_odor_pairs(i,2));
-% end
-
-% si = pins;  %stimulus index
-% si(si==31)=13;
-% si=si-1;
-% 
-% ti.channelA = pins;
-% ti.si = si;
-% 
-% ti.pin_odors = odor_list;
-%%
-
-% TODO maybe return from fn, and save outside? (to avoid needing files
-% around...)
 
 if create_mat
     save(mat_filepath, 'ti');
