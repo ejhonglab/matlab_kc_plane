@@ -52,6 +52,15 @@ for i = 1:Nframes
     else
         A = fread (fID, [sz_x sz_y], 'uint8=>uint8');
     end
-    
+
+    % I found at least one case where the actual # frames was less than
+    % Nframes. This was when length(info1) < 2 was true.
+    % This is to handle that, but I'm still not sure what was the root cause.
+    % 2019-05-02/3/tif_stacks/fn_0001.tif was the failing example.
+    if isempty(A)
+        Nframes = i;
+        stack_out = stack_out(:,:,1:Nframes);
+        break;
+    end
     stack_out(:,:,i) = A';
 end
