@@ -2,20 +2,23 @@
 function [updated] = get_stiminfo(thorimage_dir, thorsync_dir, ...
     output_dir, date, fly_num, update)
 
+% TODO TODO this is definitely failing somehow in 2019-01-18/2/* cases
+% figure out why. may impact future / other current experiments.
+
 % Can be called with all arguments, fly_num missing, or date and fly_num
 % missing.
 
 % Gets only the final directory in the path, whether or not there is a trailing
 % filesep character.
 [~, thorimage_id, ~] = fileparts(strip(thorimage_dir, filesep));
-thorimage_id = strip(thorimage_id, '_');
+%thorimage_id = strip(thorimage_id, '_');
 
 mat_output_dir = fullfile(output_dir, 'cnmf');
 if ~exist(mat_output_dir, 'dir')
     mkdir(mat_output_dir);
 end
 
-mat_filename = sprintf('_%s_cnmf.mat', thorimage_id);
+mat_filename = sprintf('%s_cnmf.mat', thorimage_id);
 mat_filepath = fullfile(mat_output_dir, mat_filename);
 
 if exist(mat_filepath, 'file')
@@ -54,11 +57,38 @@ ai = load(tsync_filepath);
 %%
 
 %%
-ti.ts = str2double(ThorImageExperiment.Streaming.Attributes.frames);
-ti.averageMode = str2double(ThorImageExperiment.LSM.Attributes.averageMode);
-ti.averageNum = str2double(ThorImageExperiment.LSM.Attributes.averageNum);
 
-fr = str2double(ThorImageExperiment.LSM.Attributes.frameRate);
+% <v4 XML format
+if isstruct(ThorImageExperiment.Streaming)
+    ti.ts = str2double(ThorImageExperiment.Streaming.Attributes.frames);
+
+% v4+ XML format
+elseif iscell(ThorImageExperiment.Streaming)
+    ti.ts = str2double(ThorImageExperiment.Streaming{1}.Attributes.frames);
+
+% TODO else error
+end
+
+% <v4 XML format
+if isstruct(ThorImageExperiment.LSM)
+    % TODO get LSM object -> share more code
+    ti.averageMode = str2double(ThorImageExperiment.LSM.Attributes.averageMode);
+    ti.averageNum = str2double(ThorImageExperiment.LSM.Attributes.averageNum);
+    fr = str2double(ThorImageExperiment.LSM.Attributes.frameRate);
+
+% v4+ XML format
+elseif iscell(ThorImageExperiment.LSM)
+    ti.averageMode = str2double(...
+        ThorImageExperiment.LSM{1}.Attributes.averageMode);
+
+    ti.averageNum = str2double(...
+        ThorImageExperiment.LSM{1}.Attributes.averageNum);
+
+    fr = str2double(ThorImageExperiment.LSM{1}.Attributes.frameRate);
+
+% TODO else fail
+end
+
 if ti.averageMode == 1
    fr = fr / ti.averageNum; 
 end
@@ -156,7 +186,12 @@ last_block_end_time = ti.block_fct(end);
 max_trigger_to_last_frame_sec = 1;
 last_fall_check_time = last_block_end_time + max_trigger_to_last_frame_sec;
 
-frameOutLogical = logical(ai.Frame_Out(ai.time <= last_fall_check_time));
+if any(strcmp(fieldnames(ai), 'Frame_Out'))
+    frameOutLogical = logical(ai.Frame_Out(ai.time <= last_fall_check_time));
+elseif any(strcmp(fieldnames(ai), 'FrameOut'))
+    frameOutLogical = logical(ai.FrameOut(ai.time <= last_fall_check_time));
+% TODO else error
+end
 % TODO maybe use pulsewidth to be consistent w/ rest of code? why not?
 % or maybe eliminate pulsewidth?
 frameOutDiff = diff(frameOutLogical);
@@ -220,6 +255,9 @@ for i = 1:length(fall_times_to_check)
     end
 end
 
+% TODO TODO why is this getting triggered in the v4 case?
+% (just the stuff that had only 3000 frames because max frames issue?)
+% TODO TODO TODO and why, similarly often, are no scopePin pulses detected?
 if isnan(last_block_fall_time)
     error(['Frame Out continued pulsing right until end of recording. ' ...
           'The recording may have stopped incorrectly.']);
