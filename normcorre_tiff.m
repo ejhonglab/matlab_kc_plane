@@ -1,6 +1,18 @@
 
 function [rig_updated, nr_updated] = normcorre_tiff(input_tif_path, output_dir)
 
+% TODO delete
+%{
+raw_dir = '/mnt/nas/mb_team/raw_data';
+analysis_dir = '/mnt/nas/mb_team/analysis_output';
+fly_dir = '2019-07-25/2';
+input_tif_path = fullfile(raw_dir, fly_dir, 'tif_stacks', '_008.tif');
+% TODO just get this to auto-increment if exists
+% TODO write params (named similarly) alongside tiff?
+num = 5;
+output_dir = fullfile(analysis_dir, fly_dir);
+%}
+
 rig_updated = false;
 nr_updated = false;
 
@@ -20,9 +32,12 @@ rig_tif = fullfile(output_dir, output_subdir, [thorimage_id '_rig.tif']);
 avg_rig_tif = fullfile(output_dir, output_subdir, 'AVG', 'rigid', ...
     ['AVG' thorimage_id '_rig.tif']);
 
-nr_tif = fullfile(output_dir, output_subdir, [thorimage_id '_nr.tif']);
+% TODO delete suffixed int for playing w/ params
+%nr_suf = sprintf('_nr%d.tif', num);
+nr_suf = '_nr.tif';
+nr_tif = fullfile(output_dir, output_subdir, [thorimage_id nr_suf]);
 avg_nr_tif = fullfile(output_dir, output_subdir, 'AVG', 'nonrigid',...
-    ['AVG' thorimage_id '_nr.tif']);
+    ['AVG' thorimage_id nr_suf]);
 
 need_rig_tif = ~ exist(rig_tif, 'file');
 need_avg_rig_tif = ~ exist(avg_rig_tif, 'file');
@@ -154,6 +169,8 @@ try
 
     if need_nr_tif
         MC_nonrigid = MotionCorrection(Y);
+        % TODO maybe try upping max_dev for bad warping?
+        % or decreasing size of regions over which rigi stuff calced?
         options_nonrigid = NoRMCorreSetParms('d1',MC_nonrigid.dims(1),...
             'd2',MC_nonrigid.dims(2),...
             'grid_size',[64,64],...
@@ -163,7 +180,8 @@ try
             'max_dev',3,...
             'us_fac',50,...
             'init_batch',200,...
-            'iter', 2);
+            'iter', 2 ...
+        );
 
         MC_nonrigid.motionCorrectParallel(options_nonrigid);
         MC_nonrigid.computeMean();
@@ -218,6 +236,8 @@ try
     % next number subscript (and not displaying the underscore).
     % actually it doesn't always seem to be a problem... why?
 
+    % TODO should really just recompute these at least whenever other thing
+    % changes. (what happens in ~need_tif & need_avg case now?)
     if need_avg_nr_tif
         % TODO flag to disable saving this average
         %AVG = single(mean(MC_nonrigid.M,3));
