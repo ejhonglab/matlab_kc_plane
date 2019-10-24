@@ -15,14 +15,21 @@ if nargin == 0
     clear all; %#ok<CLALL>
     matlab_testing = true;
 else
-    % TODO maybe assert correct n args?
+    % TODO some generaly MATLAB way to check we have all args, without having to
+    % hardcode # of args?
+    full_n_args = 4;
+    narginchk(full_n_args, full_n_args);
     matlab_testing = false;
 end
 
+% Set to true to get arguments for matlab_testing case from an external
+% invocation of this function.
+print_inputs = false;
 if matlab_testing
     write_anything = false;
     interactive_plots = true;
     update = true;
+    print_inputs = false;
     
     %{
     % Known good v4:
@@ -37,17 +44,21 @@ if matlab_testing
     output_dir='/mnt/nas/mb_team/analysis_output/2019-10-04/1';
     %}
     
-    % TODO TODO this is definitely failing somehow in 2019-01-18/2/* cases
-    % figure out why. may impact future / other current experiments.
-    % (still?)
+    % TODO this is failing somehow in 2019-01-18/2/* cases figure out why. may
+    % impact future / other current experiments. (still failing?)
 else
     write_anything = true;
     interactive_plots = false;
+    % TODO maybe somehow automatically print inputs on error
+    % (something like atexit / some global catch-all error handler?)
+    % builtin stuff (MException.last) seems to not support being called
+    % from within a function...
+    % there is: www.mathworks.com/matlabcentral/fileexchange/\
+    % 15059-handleerror-generic-error-handling-function , but I'm not sure
+    % how it works / don't want the extra dependency
+    % could set some global flags or something? possible w/o global?
 end
 
-% Set to true to get arguments for matlab_testing case from an external
-% invocation of this function.
-print_inputs = false;
 if print_inputs
     disp('');
     fprintf("thorimage_dir='%s';\n", thorimage_dir);
@@ -102,13 +113,15 @@ ai = load(tsync_filepath);
 
 %ai.fpid = smoothdata(ai.pid, 'gaussian', 100);
 
+xml_err_msg = 'Unexpected XML format.';
 % <v4 XML format
 if isstruct(ThorImageExperiment.Streaming)
     streaming = ThorImageExperiment.Streaming;
 % v4+ XML format
 elseif iscell(ThorImageExperiment.Streaming)
     streaming = ThorImageExperiment.Streaming{1};
-% TODO else error
+else
+    error(xml_err_msg);
 end
 % This is the number of frames after any averaging (looking at some v4
 % data w/ averaging and the TIFF output).
@@ -127,7 +140,8 @@ if isstruct(ThorImageExperiment.LSM)
 % v4+ XML format
 elseif iscell(ThorImageExperiment.LSM)
     lsm = ThorImageExperiment.LSM{1};
-% TODO else fail
+else
+    error(xml_err_msg);
 end
 averageMode = str2double(lsm.Attributes.averageMode);
 averageNum = str2double(lsm.Attributes.averageNum);
@@ -152,7 +166,9 @@ assert(num_frames <= max_possible_n_frames);
 % Partially to establish that ai.time is in units of seconds, but also 
 % checks an assumption that at least some fraction of time is spent taking
 % frames.
-min_time_frac_acquiring_frames = 0.4;
+% Most experiments have this value below ~0.4, but some bad ones have ~0.7
+% (like 2019-10-04/4/fn_0004). Could still warn if > ~0.4?
+min_time_frac_acquiring_frames = 0.8;
 assert((max(ai.time) * fr - num_frames) / num_frames <= ...
     min_time_frac_acquiring_frames);
 
@@ -213,15 +229,12 @@ if stim_max_frames * num_blocks == num_frames
     end
 end
 
-% TODO TODO TODO TODO and actually handle case where odor presentations are
-% / may have been missed (how to integrate w/ python analysis?)
-
-
 if any(strcmp(fieldnames(ai), 'Frame_Out'))
     frame_out = ai.Frame_Out;
 elseif any(strcmp(fieldnames(ai), 'FrameOut'))
     frame_out = ai.FrameOut;
-% TODO else error
+else
+    error(xml_err_msg);
 end
 frame_out_logical = logical(frame_out);
 
