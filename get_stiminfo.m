@@ -154,23 +154,14 @@ elseif averageMode == 1
    stim_max_frames = stim_max_frames / averageNum;
 end
 
-% From these assertions we establish that ai.time:
-% - starts at time 0
-% - is in units of seconds
-% - all frames could be captured in its range
-assert(min(ai.time) == 0);
-% (If ThorImage were acquiring frames at frame rate (fr) for the entire
-% length of time contained in the ThorSync data.)
-max_possible_n_frames = max(ai.time) * fr;
-assert(num_frames <= max_possible_n_frames);
-% Partially to establish that ai.time is in units of seconds, but also 
-% checks an assumption that at least some fraction of time is spent taking
-% frames.
-% Most experiments have this value below ~0.4, but some bad ones have ~0.7
-% (like 2019-10-04/4/fn_0004). Could still warn if > ~0.4?
-min_time_frac_acquiring_frames = 0.8;
-assert((max(ai.time) * fr - num_frames) / num_frames <= ...
-    min_time_frac_acquiring_frames);
+if any(strcmp(fieldnames(ai), 'Frame_Out'))
+    frame_out = ai.Frame_Out;
+elseif any(strcmp(fieldnames(ai), 'FrameOut'))
+    frame_out = ai.FrameOut;
+else
+    error(xml_err_msg);
+end
+frame_out_logical = logical(frame_out);
 
 % TODO does pulsewidth always have the initcross either up or down?
 % maybe don't use it if not? may also want fixed ~2.5v thresh...
@@ -208,36 +199,16 @@ num_blocks = length(block_end_time);
 % TODO TODO fix what caused block_start_time to be empty in 4-10/2/_001 case.
 % something seriously wrong with that data?
 if numel(block_start_time) > 0
+    no_scopepin_pulses_error = false;
     time = ai.time - block_start_time(1);
 else
-    error('No pulses detected in scopePin!');
+    no_scopepin_pulses_error = true;
+    % This definition is just for making trial structure plot before erring.
+    time = ai.time - ai.time(1);
 end
 
-allow_reaching_stim_max_frames = true;
-max_stimulus_frames_case = false;
-% In general, would want to compare each block's # of frames to this,
-% in case some blocks are longer than others.
-if stim_max_frames * num_blocks == num_frames
-    err_msg = ['Max number of stimulus frames reached in each block! ' ...
-        'Some odor presentations may have been missed!'];
-    
-    if allow_reaching_stim_max_frames
-        warning(err_msg);
-        max_stimulus_frames_case = true;
-    else
-        error(err_msg); %#ok<*UNRCH>
-    end
-end
-
-if any(strcmp(fieldnames(ai), 'Frame_Out'))
-    frame_out = ai.Frame_Out;
-elseif any(strcmp(fieldnames(ai), 'FrameOut'))
-    frame_out = ai.FrameOut;
-else
-    error(xml_err_msg);
-end
-frame_out_logical = logical(frame_out);
-
+% Want to make these plots before any errors could be raised (apart from XML
+% parse errors), for visual debugging.
 if interactive_plots
     fsync = figure;
 else
@@ -253,6 +224,11 @@ plot(time, frame_out_logical);
 parts = split(thorimage_dir, filesep);
 date = char(parts(end-2));
 fly_num = char(parts(end-1));
+
+% TODO is it just me, or is 'Interpreter', 'none' not working in all cases?
+% (wait, actually it's just the output of the normcorre script that had
+% issues... just port this logic over there! + maybe also the interactive_plots
+% stuff)
 
 % The last two args ('Interpreter', 'none') prevent underscores from just 
 % subscripting the next character, rather than displaying.
@@ -273,6 +249,63 @@ end
 fname = sprintf('%s_trial_structure.tif', thorimage_id);
 if write_anything
     print(fsync, fullfile(fig_output_dir, fname), '-dtiffn');
+end
+
+
+if no_scopepin_pulses_error
+    error('No pulses detected in scopePin!');
+end
+
+% From these assertions we establish that ai.time:
+% - starts at time 0
+% - is in units of seconds
+% - all frames could be captured in its range
+assert(min(ai.time) == 0);
+% (If ThorImage were acquiring frames at frame rate (fr) for the entire
+% length of time contained in the ThorSync data.)
+max_possible_n_frames = max(ai.time) * fr;
+assert(num_frames <= max_possible_n_frames);
+% Partially to establish that ai.time is in units of seconds, but also 
+% checks an assumption that at least some fraction of time is spent taking
+% frames.
+% Most experiments have this value below ~0.4, but some bad ones have ~0.7
+% (like 2019-10-04/4/fn_0004). Could still warn if > ~0.4?
+max_rel_frame_num_error = 0.8;
+
+% Anything > 0 means there was time for frames to be taken that did not have
+% frames taken. 1.0 would mean that there are half as many frames taken
+% as there would be if frames were taken for all the time represented by
+% ThorSync.
+rel_frame_num_error = (max(ai.time) * fr - num_frames) / num_frames;
+
+% This should mean that there are more actual frames than possible given
+% the amount of time represented in ThorSync (multiplied by frame rate).
+% This would be unexpected, hence the assert, but may occur b/c corrupt
+% or incomplete ThorSync output, or if ThorImage and ThorSync output
+% is incorrectly matched up.
+assert(rel_frame_num_error >= 0.0);
+
+if rel_frame_num_error > max_rel_frame_num_error
+    wmsg = ['Smaller fraction of ThorSync time had frames taken than ' ...
+        'expected. rel_frame_num_error: %d'];
+
+    warning(sprintf(wmsg, rel_frame_num_error));
+end
+
+allow_reaching_stim_max_frames = true;
+max_stimulus_frames_case = false;
+% In general, would want to compare each block's # of frames to this,
+% in case some blocks are longer than others.
+if stim_max_frames * num_blocks == num_frames
+    err_msg = ['Max number of stimulus frames reached in each block! ' ...
+        'Some odor presentations may have been missed!'];
+    
+    if allow_reaching_stim_max_frames
+        warning(err_msg);
+        max_stimulus_frames_case = true;
+    else
+        error(err_msg); %#ok<*UNRCH>
+    end
 end
 
 assert(length(ti.block_start_sample) == length(block_end_sample));
