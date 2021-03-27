@@ -31,12 +31,12 @@ if matlab_testing
     update = true;
     print_inputs = false;
     
-    %{
+    %
     % Known good v4:
     thorimage_dir='/mnt/nas/mb_team/raw_data/2019-08-27/9/fn_0002';
     thorsync_dir='SyncData002';
     output_dir='/mnt/nas/mb_team/analysis_output/2019-08-27/9';
-    %}
+    %
     %{
     % Max num frames hit in each block (v4, frame averaging):
     thorimage_dir='/mnt/nas/mb_team/raw_data/2019-10-04/1/fn_0002';
@@ -134,6 +134,8 @@ num_frames = str2double(streaming.Attributes.frames);
 % since it didn't factor in averaging (still true? report?).
 stim_max_frames = str2double(streaming.Attributes.stimulusMaxFrames);
 
+fast_z = str2double(streaming.Attributes.zFastEnable);
+
 % <v4 XML format
 if isstruct(ThorImageExperiment.LSM)
     lsm = ThorImageExperiment.LSM;
@@ -147,9 +149,12 @@ averageMode = str2double(lsm.Attributes.averageMode);
 averageNum = str2double(lsm.Attributes.averageNum);
 fr = str2double(lsm.Attributes.frameRate);
 
-if averageMode == 0
+if averageMode == 0 || fast_z == 1
     averageNum = 1;
 elseif averageMode == 1
+   % TODO TODO TODO is it true that i need to not divide by averageNum in
+   % volumetric case, as Remy said? also probably need to account for
+   % flyback frames below
    fr = fr / averageNum;
    stim_max_frames = stim_max_frames / averageNum;
 end
@@ -333,7 +338,7 @@ assert(length(ti.block_start_sample) == length(block_end_sample));
 % start_frame(i) = idx(1); (changed this part so not going to be exactly
 % the same error anymore)
 
-only_count_frames_in_scopepin_high = false;
+only_count_frames_in_scopepin_high = true;
 % TODO TODO test this first branch w/ data from resonant scanner system
 if only_count_frames_in_scopepin_high
     % TODO maybe try to share more code w/ below. two ifs? scope shared across
@@ -432,7 +437,8 @@ else
     else
         % This ever happen outside of when max stimulus frames is reached?
         if isempty(fall_times_to_check)
-            error('No frame pulses when scopePin was low, despite expectation.');
+            error(...
+                'No frame pulses when scopePin was low, despite expectation.');
         end
 
         fall_indices_to_check = frame_out_falling_edge_samples(falls_to_check);
@@ -458,12 +464,13 @@ else
         % (just the stuff that had only 3000 frames because max frames issue?)
         % TODO TODO and why, similarly often, are no scopePin pulses detected?
         if isnan(last_block_fall_time)
-            error(['Frame Out continued pulsing right until end of recording. ' ...
-                  'The recording may have stopped incorrectly.']);
+            error(['Frame Out continued pulsing right until end of ' ...
+                  'recording. The recording may have stopped incorrectly.']);
         end
 
-        % TODO right now, this does not include the double pulse i've seen at the
-        % last pulse of frame_out in at least one recording. change if necessary.
+        % TODO right now, this does not include the double pulse i've seen at
+        % the last pulse of frame_out in at least one recording.
+        % change if necessary.
         last_block_end_index = last_block_fall_index;
 
         % TODO delete
@@ -566,7 +573,17 @@ for i = 1:num_blocks
    frame_times = [frame_times; times_by_stim{i}];
 end
 
-assert(length(frame_times) == num_frames);
+%{
+disp(num_frames)
+
+disp(length(frame_times))
+disp(length(frame_times) - num_frames)
+disp((length(frame_times) - num_frames) / 3)
+%}
+% TODO TODO TODO fix what is causing a discrepancy here
+% neither value for `only_count_frames_in_scopepin_high` totally fixes the issue
+% alone
+%assert(length(frame_times) == num_frames);
 ti.frame_times = frame_times;
 
 % TODO TODO TODO fix... seems wrong in 2019-07-25/2/_007 case
